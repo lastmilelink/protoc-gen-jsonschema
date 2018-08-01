@@ -538,6 +538,7 @@ func commandLineParameter(parameters string) {
 }
 
 func main() {
+	fmt.Println("+++++ Hello world")
 	flag.Parse()
 	ok := true
 	logWithLevel(LOG_DEBUG, "Processing code generator request")

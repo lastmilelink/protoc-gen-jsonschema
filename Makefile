@@ -20,3 +20,6 @@ samples:
 
 test:
 	@go test
+
+install:
+	go get -u github.com/lastmilelink/protoc-gen-jsonschema
