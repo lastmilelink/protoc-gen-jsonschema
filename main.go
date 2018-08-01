@@ -183,6 +183,8 @@ func convertField(curPkg *ProtoPackage, desc *descriptor.FieldDescriptorProto, m
 		Properties: make(map[string]*jsonschema.Type),
 	}
 
+	fmt.Printf("+++++ type name = %+v\n", desc.GetTypeName())
+
 	// Switch the types, and pick a JSONSchema equivalent:
 	switch desc.GetType() {
 	case descriptor.FieldDescriptorProto_TYPE_DOUBLE,
