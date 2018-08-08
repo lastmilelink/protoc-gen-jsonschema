@@ -18,11 +18,12 @@ import (
 	"path"
 	"strings"
 
-	jsonschema "github.com/alecthomas/jsonschema"
-	proto "github.com/golang/protobuf/proto"
-	descriptor "github.com/golang/protobuf/protoc-gen-go/descriptor"
+	"github.com/golang/protobuf/proto"
+	"github.com/golang/protobuf/protoc-gen-go/descriptor"
 	plugin "github.com/golang/protobuf/protoc-gen-go/plugin"
-	gojsonschema "github.com/xeipuuv/gojsonschema"
+	"github.com/iancoleman/strcase"
+	"github.com/lastmilelink/protoc-gen-jsonschema/jsonschema"
+	"github.com/xeipuuv/gojsonschema"
 )
 
 const (
@@ -37,7 +38,7 @@ const (
 var (
 	allowNullValues              bool = false
 	disallowAdditionalProperties bool = false
-	disallowBigIntsAsStrings     bool = false
+	disallowBigIntsAsStrings     bool = true // OTD: shouldn't allow big integer as string, as this causes serious type safety issue
 	debugLogging                 bool = false
 	globalPkg                         = &ProtoPackage{
 		name:     "",
@@ -74,7 +75,7 @@ func init() {
 
 func logWithLevel(logLevel LogLevel, logFormat string, logParams ...interface{}) {
 	// If we're not doing debug logging then just return:
-	if logLevel <= LOG_INFO && !debugLogging {
+	if logLevel <= LOG_DEBUG && !debugLogging {
 		return
 	}
 
@@ -183,13 +184,18 @@ func convertField(curPkg *ProtoPackage, desc *descriptor.FieldDescriptorProto, m
 		Properties: make(map[string]*jsonschema.Type),
 	}
 
-	fmt.Printf("+++++ type name = %+v\n", desc.GetTypeName())
+	required, err := isRequired(desc, jsonSchemaType)
+	if err != nil {
+		return nil, err
+	}
+
+	var radicalType string
 
 	// Switch the types, and pick a JSONSchema equivalent:
 	switch desc.GetType() {
 	case descriptor.FieldDescriptorProto_TYPE_DOUBLE,
 		descriptor.FieldDescriptorProto_TYPE_FLOAT:
-		if allowNullValues {
+		if allowNullValues && !required {
 			jsonSchemaType.OneOf = []*jsonschema.Type{
 				{Type: gojsonschema.TYPE_NULL},
 				{Type: gojsonschema.TYPE_NUMBER},
@@ -197,13 +203,14 @@ func convertField(curPkg *ProtoPackage, desc *descriptor.FieldDescriptorProto, m
 		} else {
 			jsonSchemaType.Type = gojsonschema.TYPE_NUMBER
 		}
+		radicalType = gojsonschema.TYPE_NUMBER
 
 	case descriptor.FieldDescriptorProto_TYPE_INT32,
 		descriptor.FieldDescriptorProto_TYPE_UINT32,
 		descriptor.FieldDescriptorProto_TYPE_FIXED32,
 		descriptor.FieldDescriptorProto_TYPE_SFIXED32,
 		descriptor.FieldDescriptorProto_TYPE_SINT32:
-		if allowNullValues {
+		if allowNullValues && !required {
 			jsonSchemaType.OneOf = []*jsonschema.Type{
 				{Type: gojsonschema.TYPE_NULL},
 				{Type: gojsonschema.TYPE_INTEGER},
@@ -211,6 +218,7 @@ func convertField(curPkg *ProtoPackage, desc *descriptor.FieldDescriptorProto, m
 		} else {
 			jsonSchemaType.Type = gojsonschema.TYPE_INTEGER
 		}
+		radicalType = gojsonschema.TYPE_INTEGER
 
 	case descriptor.FieldDescriptorProto_TYPE_INT64,
 		descriptor.FieldDescriptorProto_TYPE_UINT64,
@@ -221,13 +229,14 @@ func convertField(curPkg *ProtoPackage, desc *descriptor.FieldDescriptorProto, m
 		if !disallowBigIntsAsStrings {
 			jsonSchemaType.OneOf = append(jsonSchemaType.OneOf, &jsonschema.Type{Type: gojsonschema.TYPE_STRING})
 		}
-		if allowNullValues {
+		if allowNullValues && !required {
 			jsonSchemaType.OneOf = append(jsonSchemaType.OneOf, &jsonschema.Type{Type: gojsonschema.TYPE_NULL})
 		}
+		radicalType = gojsonschema.TYPE_INTEGER
 
 	case descriptor.FieldDescriptorProto_TYPE_STRING,
 		descriptor.FieldDescriptorProto_TYPE_BYTES:
-		if allowNullValues {
+		if allowNullValues && !required {
 			jsonSchemaType.OneOf = []*jsonschema.Type{
 				{Type: gojsonschema.TYPE_NULL},
 				{Type: gojsonschema.TYPE_STRING},
@@ -235,6 +244,7 @@ func convertField(curPkg *ProtoPackage, desc *descriptor.FieldDescriptorProto, m
 		} else {
 			jsonSchemaType.Type = gojsonschema.TYPE_STRING
 		}
+		radicalType = gojsonschema.TYPE_STRING
 
 	case descriptor.FieldDescriptorProto_TYPE_ENUM:
 		jsonSchemaType.OneOf = append(jsonSchemaType.OneOf, &jsonschema.Type{Type: gojsonschema.TYPE_STRING})
@@ -261,7 +271,7 @@ func convertField(curPkg *ProtoPackage, desc *descriptor.FieldDescriptorProto, m
 		}
 
 	case descriptor.FieldDescriptorProto_TYPE_BOOL:
-		if allowNullValues {
+		if allowNullValues && !required {
 			jsonSchemaType.OneOf = []*jsonschema.Type{
 				{Type: gojsonschema.TYPE_NULL},
 				{Type: gojsonschema.TYPE_BOOLEAN},
@@ -269,6 +279,7 @@ func convertField(curPkg *ProtoPackage, desc *descriptor.FieldDescriptorProto, m
 		} else {
 			jsonSchemaType.Type = gojsonschema.TYPE_BOOLEAN
 		}
+		radicalType = gojsonschema.TYPE_BOOLEAN
 
 	case descriptor.FieldDescriptorProto_TYPE_GROUP,
 		descriptor.FieldDescriptorProto_TYPE_MESSAGE:
@@ -284,20 +295,30 @@ func convertField(curPkg *ProtoPackage, desc *descriptor.FieldDescriptorProto, m
 		return nil, fmt.Errorf("unrecognized field type: %s", desc.GetType().String())
 	}
 
+	// ===== OTD specific conversions start =====
+	switch desc.GetType() {
+	case descriptor.FieldDescriptorProto_TYPE_MESSAGE:
+		convertTimestamp(desc, jsonSchemaType)
+	case descriptor.FieldDescriptorProto_TYPE_ENUM:
+		convertEnum(desc, jsonSchemaType)
+	}
+
+	// Disallow any addition properties: we don't want services to send fields that are not specified in proto
+	jsonSchemaType.AdditionalProperties = []byte("false")
+
+	// ===== OTD specific conversions end =====
+
 	// Recurse array of primitive types:
 	if desc.GetLabel() == descriptor.FieldDescriptorProto_LABEL_REPEATED && jsonSchemaType.Type != gojsonschema.TYPE_OBJECT {
 		jsonSchemaType.Items = &jsonschema.Type{
-			Type:  jsonSchemaType.Type,
-			OneOf: jsonSchemaType.OneOf,
+			Type: radicalType,
 		}
-		if allowNullValues {
-			jsonSchemaType.OneOf = []*jsonschema.Type{
-				{Type: gojsonschema.TYPE_NULL},
-				{Type: gojsonschema.TYPE_ARRAY},
-			}
-		} else {
-			jsonSchemaType.Type = gojsonschema.TYPE_ARRAY
-			jsonSchemaType.OneOf = []*jsonschema.Type{}
+		jsonSchemaType.Type = gojsonschema.TYPE_ARRAY
+		jsonSchemaType.OneOf = nil
+
+		err = addRules(desc, jsonSchemaType)
+		if err != nil {
+			return nil, err
 		}
 
 		return jsonSchemaType, nil
@@ -327,14 +348,34 @@ func convertField(curPkg *ProtoPackage, desc *descriptor.FieldDescriptorProto, m
 		}
 
 		// Optionally allow NULL values:
-		if allowNullValues {
+		if allowNullValues && !required {
 			jsonSchemaType.OneOf = []*jsonschema.Type{
 				{Type: gojsonschema.TYPE_NULL},
 				{Type: jsonSchemaType.Type},
 			}
 			jsonSchemaType.Type = ""
 		}
+		jsonSchemaType.Required = recursedJSONSchemaType.Required
 	}
+
+	// ===== OTD specific conversions start =====
+	err = addRules(desc, jsonSchemaType)
+	if err != nil {
+		return nil, err
+	}
+
+	// Run again just in case anything changed
+	switch desc.GetType() {
+	case descriptor.FieldDescriptorProto_TYPE_MESSAGE:
+		convertTimestamp(desc, jsonSchemaType)
+	case descriptor.FieldDescriptorProto_TYPE_ENUM:
+		convertEnum(desc, jsonSchemaType)
+	}
+
+	// Disallow any addition properties: we don't want services to send fields that are not specified in proto
+	jsonSchemaType.AdditionalProperties = []byte("false")
+
+	// ===== OTD specific conversions end =====
 
 	return jsonSchemaType, nil
 }
@@ -348,15 +389,7 @@ func convertMessageType(curPkg *ProtoPackage, msg *descriptor.DescriptorProto) (
 		Version:    jsonschema.Version,
 	}
 
-	// Optionally allow NULL values:
-	if allowNullValues {
-		jsonSchemaType.OneOf = []*jsonschema.Type{
-			{Type: gojsonschema.TYPE_NULL},
-			{Type: gojsonschema.TYPE_OBJECT},
-		}
-	} else {
-		jsonSchemaType.Type = gojsonschema.TYPE_OBJECT
-	}
+	jsonSchemaType.Type = gojsonschema.TYPE_OBJECT
 
 	// disallowAdditionalProperties will prevent validation where extra fields are found (outside of the schema):
 	if disallowAdditionalProperties {
@@ -366,14 +399,18 @@ func convertMessageType(curPkg *ProtoPackage, msg *descriptor.DescriptorProto) (
 	}
 
 	logWithLevel(LOG_DEBUG, "Converting message: %s", proto.MarshalTextString(msg))
+	var fieldNames []string
 	for _, fieldDesc := range msg.GetField() {
 		recursedJSONSchemaType, err := convertField(curPkg, fieldDesc, msg)
 		if err != nil {
 			logWithLevel(LOG_ERROR, "Failed to convert field %s in %s: %v", fieldDesc.GetName(), msg.GetName(), err)
 			return jsonSchemaType, err
 		}
-		jsonSchemaType.Properties[fieldDesc.GetName()] = recursedJSONSchemaType
+		fieldName := strcase.ToLowerCamel(fieldDesc.GetName())
+		jsonSchemaType.Properties[fieldName] = recursedJSONSchemaType
+		fieldNames = append(fieldNames, fieldName)
 	}
+	jsonSchemaType.Required = fieldNames
 	return jsonSchemaType, nil
 }
 
@@ -475,6 +512,7 @@ func convertFile(file *descriptor.FileDescriptorProto) ([]*plugin.CodeGeneratorR
 }
 
 func convert(req *plugin.CodeGeneratorRequest) (*plugin.CodeGeneratorResponse, error) {
+	findAllEnumTypes(req)
 	generateTargets := make(map[string]bool)
 	for _, file := range req.GetFileToGenerate() {
 		generateTargets[file] = true
@@ -538,7 +576,6 @@ func commandLineParameter(parameters string) {
 }
 
 func main() {
-	fmt.Println("+++++ Hello world")
 	flag.Parse()
 	ok := true
 	logWithLevel(LOG_DEBUG, "Processing code generator request")

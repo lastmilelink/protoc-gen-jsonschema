@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package example;
+
+import "validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+import "otd_example_dep.proto";
+
+message ExampleEvent {
+    UpdateBody update_body = 1 [(validate.rules).any.required = true];
+    google.protobuf.Timestamp updated_at = 2 [(validate.rules).timestamp.required = true];
+}
+
+message UpdateBody {
+    string customer_id = 1 [(validate.rules).string.min_len = 1];
+    int64 age = 2 [(validate.rules).int64.gte = 0];
+    float income = 3 [(validate.rules).double = {gte:1000, lte:10000}];
+    string account_id = 4 [(validate.rules).string.prefix = "otd"];
+    string sub_account_id = 5 [(validate.rules).string.suffix = "otd"];
+    Address address = 6 [(validate.rules).any.required = true];
+    repeated Stop stops = 7 [(validate.rules).repeated.min_items = 1];
+}
+
+message Stop {
+    string stop_id = 1 [(validate.rules).string.min_len = 1];
+    Coordinates coordinates = 2 [(validate.rules).any.required = true];
+}
+
+message Coordinates {
+    double latitude = 1 [(validate.rules).double = { gte: -90,  lte: 90 }];
+    double longitude = 2 [(validate.rules).double = { gte: -180, lte: 180 }];
+}

@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+package example;
+
+import "validate/validate.proto";
+
+message Address {
+    repeated string streets = 1 [(validate.rules).repeated.min_items = 1];
+    string town = 2 [(validate.rules).string.min_len = 1];
+    Country country = 3;
+    string postcode = 4 [(validate.rules).string.pattern = "^[0-9A-Z]{2,5} [0-9A-Z]{2,5}$"];
+}
+
+enum Country {
+    GBR = 0;
+    USA = 1;
+}

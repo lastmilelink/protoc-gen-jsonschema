@@ -1,0 +1,49 @@
+hash: bdc2cafabc8bdf5f5a8a0a57c4245e0427e0e7bb7e923ab3f359db0895ae6f60
+updated: 2018-08-06T18:28:49.865575032+01:00
+imports:
+- name: github.com/gogo/protobuf
+  version: 636bf0302bc95575d69441b25a2603156ffdddf1
+- name: github.com/golang/protobuf
+  version: b4deda0973fb4c70b50d226b1af49f3da59f5265
+  subpackages:
+  - proto
+  - protoc-gen-go/descriptor
+  - protoc-gen-go/plugin
+  - ptypes/duration
+  - ptypes/timestamp
+- name: github.com/iancoleman/strcase
+  version: 3605ed457bf7f8caa1371b4fafadadc026673479
+- name: github.com/lyft/protoc-gen-validate
+  version: 930a67cf7ba41b9d9436ad7a1be70a5d5ff6e1fc
+  subpackages:
+  - validate
+- name: github.com/sirupsen/logrus
+  version: 8c0189d9f6bbf301e5d055d34268156b317016af
+- name: github.com/stretchr/testify
+  version: f35b8ab0b5a2cef36673838d662e249dd9c94686
+  subpackages:
+  - assert
+- name: github.com/xeipuuv/gojsonpointer
+  version: 4e3ac2762d5f479393488629ee9370b50873b3a6
+- name: github.com/xeipuuv/gojsonreference
+  version: bd5ef7bd5415a7ac448318e64f11a24cd21e594b
+- name: github.com/xeipuuv/gojsonschema
+  version: 8bcffc811467a5f691810420385be6e66b35a317
+testImports:
+- name: github.com/davecgh/go-spew
+  version: 8991bc29aa16c548c550c7ff78260e27b9ab7c73
+  subpackages:
+  - spew
+- name: github.com/pmezard/go-difflib
+  version: 792786c7400a136282c1664665ae0a8db921c6c2
+  subpackages:
+  - difflib
+- name: golang.org/x/crypto
+  version: 650f4a345ab4e5b245a3034b110ebc7299e68186
+  subpackages:
+  - ssh/terminal
+- name: golang.org/x/sys
+  version: 8dbc5d05d6edcc104950cc299a1ce6641235bc86
+  subpackages:
+  - unix
+  - windows
